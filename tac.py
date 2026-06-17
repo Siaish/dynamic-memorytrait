@@ -4,14 +4,13 @@ from dotenv import load_dotenv
 from tac import TAC, TACConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
+from tac.channels.whatsapp import WhatsAppChannel, WhatsAppChannelConfig
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.server import TACFastAPIServer
 from tac.tools.handoff import create_studio_handoff_tool
 
-
 load_dotenv()
-
 set_tracing_disabled(True)
 tac = TAC(config=TACConfig.from_env())
 # Verify the handoff-specific env var is set.
@@ -37,40 +36,42 @@ HANDOFF_ATTRIBUTES = {
 }
 conversation_history: dict[str, list[Any]] = {}
 
+
 async def handle_message_ready(
     user_message: str,
     context: ConversationSession,
     memory_response: TACMemoryResponse | None,
 ) -> str:
-    #from app.py 
+    # from app.py
     conv_id = context.conversation_id
 
+    if conv_id not in conversation_history:
+        conversation_history[conv_id] = [
+            {"role": "system", "content": SYSTEM_INSTRUCTIONS}
+        ]
 
-    
-    if conv_id not in conversation_history: 
-        conversation_history[conv_id] = [{"role": "system", "content": SYSTEM_INSTRUCTIONS}]
-
-
-   #adding user message in conversation
+    # adding user message in conversation
     conversation_history[conv_id].append({"role": "user", "content": user_message})
-    handoff_tool = create_studio_handoff_tool(tac, context, attributes=HANDOFF_ATTRIBUTES)
+    handoff_tool = create_studio_handoff_tool(
+        tac, context, attributes=HANDOFF_ATTRIBUTES
+    )
 
-
-    if (memory_response):
+    if memory_response:
         memory_sections = memory_response.build_memory_prompts()
+
         if memory_sections:
-            SYSTEM_INSTRUCTIONS_modified = SYSTEM_INSTRUCTIONS  + "\n\n" + "\n\n".join(memory_sections)
-    
-    
+            SYSTEM_INSTRUCTIONS_modified = (
+                SYSTEM_INSTRUCTIONS + "\n\n" + "\n\n".join(memory_sections)
+            )
+         
+
         profile = context.profile
-        print(profile)
         if profile and profile.traits:
-              language = profile.traits.get("Contact", {}).get("language")
-              if language:
-                  SYSTEM_INSTRUCTIONS_modified+=  f"\n\nSwitch to language {language} for further communication"
+            language = profile.traits.get("preferences", {}).get("language")
+            print("User Preffered Language :", language)
+            uselang = (f"Switch to language {language} for further communication,you can change the language to desired language if you are asked to change language")
+            SYSTEM_INSTRUCTIONS_modified = SYSTEM_INSTRUCTIONS_modified  + uselang
 
-
-    
     agent = Agent(
         name="Customer Service Agent",
         instructions=SYSTEM_INSTRUCTIONS_modified,
@@ -78,16 +79,18 @@ async def handle_message_ready(
     )
     history = conversation_history.get(context.conversation_id, [])
     agent_input = history + [{"role": "user", "content": user_message}]
-#sending it to openAI, result is returned from openAI
+    # sending it to openAI, result is returned from openAI
     result = await Runner.run(agent, agent_input)
-#result is added in conv history : 
+    # result is added in conv history :
     conversation_history[context.conversation_id] = result.to_input_list()
     return result.final_output_as(str)
 
 
-
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
+whatsapp_channel = WhatsAppChannel(tac, config=WhatsAppChannelConfig(memory_mode="always"))
+
+
 tac.on_message_ready(handle_message_ready)
 if __name__ == "__main__":
     server = TACFastAPIServer(
