@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from tac import TAC, TACConfig
 from tac.channels.sms import SMSChannel, SMSChannelConfig
 from tac.channels.voice import VoiceChannel, VoiceChannelConfig
-from tac.channels.whatsapp import WhatsAppChannel, WhatsAppChannelConfig
 from tac.models.session import ConversationSession
 from tac.models.tac import TACMemoryResponse
 from tac.server import TACFastAPIServer
@@ -88,7 +87,7 @@ async def handle_message_ready(
 
 voice_channel = VoiceChannel(tac, config=VoiceChannelConfig(memory_mode="always"))
 sms_channel = SMSChannel(tac, config=SMSChannelConfig(memory_mode="always"))
-whatsapp_channel = WhatsAppChannel(tac, config=WhatsAppChannelConfig(memory_mode="always"))
+
 
 
 tac.on_message_ready(handle_message_ready)
