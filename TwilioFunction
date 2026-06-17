@@ -1,0 +1,89 @@
+const axios = require('axios');
+const { OpenAI } = require('openai');
+
+
+exports.handler = async function(context, event, callback) {
+
+    try {
+        const openai = new OpenAI({ apiKey: context.OPENAI_API_KEY });
+        const summary = event.operatorResults?.[1]?.result?.text;
+        const conversation_sid = event.conversationId;
+        const parti_obj = event.operatorResults?.[0]?.executionDetails?.participants || [];
+        const extractmem = parti_obj.filter((x) => x.type === "CUSTOMER");
+        const mem_profile = extractmem[0]["profileId"];
+
+        console.log("The Memory profile of customer : ", mem_profile);
+        console.log("The Summary of ", conversation_sid, " : ", summary);
+
+        async function updateTrait({ key, value }) {
+            try {
+                console.log("save", key, value);
+
+                const accountSid = context.TWILIO_ACCOUNT_SID;
+                const authToken = context.TWILIO_AUTH_TOKEN;
+                const mem_store = context.TWILIO_MEMORY_STORE_SID;
+                const url = `https://memory.twilio.com/v1/Stores/${mem_store}/Profiles/${mem_profile}`;
+
+                const requestmade = await axios.patch(url, { traits: { preferences: { [key]: value } } },
+                    {
+                        auth: {
+                            username: accountSid,
+                            password: authToken,
+                        },
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    }
+                );
+                console.log("Twilio Memory updated successfully:", requestmade.data);
+            }
+            catch (error) { console.log("Error:", error.message); }
+        }
+
+        const tools = [
+            {
+                type: "function",
+                name: "update_trait",   // ← flat, no "function" wrapper
+                description: "Save user preferences as traits",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        key: { type: "string", enum: ["model", "color", "country", "language"] },
+                        value: { type: "string" }
+                    },
+                    required: ["key", "value"],
+                    additionalProperties: false
+                }
+            }
+        ];
+
+        const response = await openai.responses.create({
+            model: "gpt-4.1-mini",
+            input: [
+                {
+                    role: "system",
+                    content: "Extract user preferences (model, color, country, language from the summary. Call update_trait once for each preference found."
+                },
+                { role: "user", content: summary }
+            ],
+            tools,
+            tool_choice: "auto"
+        });
+        
+        console.log(response.output);
+        for (const item of response.output) {
+            if (item.type === "function_call" && item.name === "update_trait") {
+                const args = JSON.parse(item.arguments);
+                console.log(args);
+                await updateTrait(args);
+            } else {
+                console.log("item type is not of function_call");
+            }
+        }
+        return callback(null, "ok");
+    }
+    catch(error){
+        console.log(error); 
+        return callback(error);
+    }
+}
